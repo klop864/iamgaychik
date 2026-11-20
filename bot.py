@@ -28,24 +28,24 @@ async def handle_messages(message: types.Message):
 
     text = message.text.lower().strip()
     command = ""
+
+    # Если сообщение начинается с "еблан", отрезаем это слово (работает и в ЛС, и в чатах)
+    if text.startswith("еблан"):
+        command = text[5:].strip()
     
-    # ПРОВЕРКА 1: Личный чат (ЛС)
-    if message.chat.type == "private":
-        # В личке имя "еблан" не обязательно
+    # Если это личный чат (ЛС)
+    elif message.chat.type == "private":
+        # Если в личке написали БЕЗ слова "еблан", берем весь текст
         command = text
         
-    # ПРОВЕРКА 2: Группа или супергруппа
+    # Если это группа или супергруппа
     elif message.chat.type in ["group", "supergroup"]:
-        # Вариант А: Написали с именем "еблан"
-        if text.startswith("еблан"):
-            command = text[5:].strip()
-        
-        # Вариант Б: Ответили (реплай) на сообщение бота
-        elif message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
+        # В группе без слова "еблан" срабатывает только реплай на сообщение бота
+        if message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
             command = text
 
     # --- ВЫПОЛНЕНИЕ КОМАНД ---
-    # Если команда так и осталась пустой, бот просто промолчит
+    # Если команда так и осталась пустой (например, просто написали "еблан" или левое слово в группе), бот молчит
     if not command:
         return
 
@@ -61,7 +61,7 @@ async def handle_messages(message: types.Message):
     elif command == "иди нахуй":
         await message.answer("Сам иди нахуй")
         
-    # На всё остальное (включая одиночное "еблан") бот молчит
+    # На всё остальное бот молчит
     else:
         pass 
 
