@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- БАЗОВЫЕ КОМАНДЫ ---
+# --- БАЗОВЫЕ КОМАНДЫ (работают везде) ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(f"Пошел нахуй, {message.from_user.first_name}")
@@ -20,36 +20,48 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer("Иди нахуй")
 
-# --- ЛОГИКА ОБРАЩЕНИЯ ПО ИМЕНИ ---
+# --- ЛОГИКА ОБРАБОТКИ СООБЩЕНИЙ ---
 @dp.message()
 async def handle_messages(message: types.Message):
     if not message.text:
         return
 
     text = message.text.lower().strip()
-
-    # Проверяем, начинается ли сообщение с имени "еблан"
-    if text.startswith("еблан"):
-        command = text[5:].strip()
-
-        if command == "привет":
-            # Убрали имя
-            await message.answer("Привет, иди нахуй")
-        
-        elif command == "как дела":
-            await message.answer("Да иди ты нахуй")
-        
-        elif command == "что ты умеешь":
-            await message.answer("Я умею ходить нахуй")
-            
-        elif command == "иди нахуй":
-            await message.answer("Сам иди нахуй")
-            
-        # На одиночное "еблан" теперь тоже молчим (убрали else if command == "")
-        else:
-            pass
+    command = ""
     
-    # На сообщения без имени "еблан" тоже молчим
+    # ПРОВЕРКА 1: Личный чат (ЛС)
+    if message.chat.type == "private":
+        # В личке имя "еблан" не обязательно
+        command = text
+        
+    # ПРОВЕРКА 2: Группа или супергруппа
+    elif message.chat.type in ["group", "supergroup"]:
+        # Вариант А: Написали с именем "еблан"
+        if text.startswith("еблан"):
+            command = text[5:].strip()
+        
+        # Вариант Б: Ответили (реплай) на сообщение бота
+        elif message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
+            command = text
+
+    # --- ВЫПОЛНЕНИЕ КОМАНД ---
+    # Если команда так и осталась пустой, бот просто промолчит
+    if not command:
+        return
+
+    if command == "привет":
+        await message.answer("Привет, иди нахуй")
+    
+    elif command == "как дела":
+        await message.answer("Да иди ты нахуй")
+    
+    elif command == "что ты умеешь":
+        await message.answer("Я умею ходить нахуй")
+        
+    elif command == "иди нахуй":
+        await message.answer("Сам иди нахуй")
+        
+    # На всё остальное (включая одиночное "еблан") бот молчит
     else:
         pass 
 
