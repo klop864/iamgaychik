@@ -1,30 +1,62 @@
 import asyncio
 import logging
 import os
-import json
+import random
+import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
-# Токен из настроек Railway
+# Токен и база из настроек Railway
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
+ADMIN_ID = 6185219874
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-DB_FILE = "users.json"
-ADMIN_ID = 6185219874  # Твой Telegram ID (никому не показывай)
+# Стандартные красные числа в рулетке
+RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
 
-# --- ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ---
-def load_users():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
+async def init_db():
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            nickname TEXT,
+            description TEXT,
+            balance BIGINT DEFAULT 10
+        )
+    ''')
+    await conn.close()
 
-def save_users(users):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=4)
+async def get_user(user_id):
+    conn = await asyncpg.connect(DATABASE_URL)
+    user = await conn.fetchrow('SELECT nickname, description, balance FROM users WHERE user_id = $1', user_id)
+    if not user:
+        # Создаем пользователя с балансом 10
+        await conn.execute('INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)', 
+                           user_id, "Без ника", "", 10)
+        await conn.close()
+        return {"nickname": "Без ника", "description": "", "balance": 10}
+    await conn.close()
+    return dict(user)
+
+async def update_user(user_id, field, value):
+    conn = await asyncpg.connect(DATABASE_URL)
+    user = await conn.fetchrow('SELECT user_id FROM users WHERE user_id = $1', user_id)
+    if not user:
+        await conn.execute('INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)', user_id, "Без ника", "", 10)
+    query = f'UPDATE users SET {field} = $1 WHERE user_id = $2'
+    await conn.execute(query, value, user_id)
+    await conn.close()
+
+async def get_user_by_username(username):
+    conn = await asyncpg.connect(DATABASE_URL)
+    user = await conn.fetchrow('SELECT user_id FROM users WHERE nickname = $1', username)
+    await conn.close()
+    return user['user_id'] if user else None
 
 # --- БАЗОВЫЕ КОМАНДЫ ---
 @dp.message(Command("start"))
@@ -45,11 +77,9 @@ async def handle_messages(message: types.Message):
     original_text = message.text.strip()
     command = ""
 
-    # Проверяем, начинается ли с "еблан"
     if text.startswith("еблан"):
         command = text[5:].strip()
         original_command = original_text[5:].strip()
-    # В ЛС или в ответ на сообщение бота можно без слова "еблан"
     elif message.chat.type == "private" or (message.reply_to_message and message.reply_to_message.from_user.id == bot.id):
         command = text
         original_command = original_text
@@ -59,52 +89,32 @@ async def handle_messages(message: types.Message):
     if not command:
         return
 
+    user_id = message.from_user.id
+
     # --- КОМАНДЫ ---
     if command == "привет":
         await message.answer("Привет, иди нахуй")
-    
     elif command == "как дела":
         await message.answer("Да иди ты нахуй")
-    
     elif command == "что ты умеешь":
         await message.answer("Я умею ходить нахуй")
-        
     elif command == "иди нахуй":
         await message.answer("Сам иди нахуй")
 
     # --- ПРОФИЛЬ ---
     elif command == "профиль":
-        user_id = str(message.from_user.id)
-        users = load_users()
-        
-        if user_id not in users:
-            users[user_id] = {
-                "nickname": message.from_user.username or message.from_user.first_name,
-                "description": "",
-                "balance": 0
-            }
-            save_users(users)
-        
-        user_data = users[user_id]
-        
+        user_data = await get_user(user_id)
         profile_text = f"👤 Ник: {user_data['nickname']}\n"
         if user_data['description']:
             profile_text += f"📝 Описание: {user_data['description']}\n"
         profile_text += f"💰 Баланс: {user_data['balance']}$"
-        
         await message.answer(profile_text)
 
     # --- УСТАНОВКА НИКА ---
     elif command.startswith("ник "):
         new_nick = original_command[4:].strip()
         if new_nick:
-            user_id = str(message.from_user.id)
-            users = load_users()
-            if user_id not in users:
-                users[user_id] = {"nickname": "", "description": "", "balance": 0}
-            
-            users[user_id]["nickname"] = new_nick
-            save_users(users)
+            await update_user(user_id, "nickname", new_nick)
             await message.answer(f"Ник изменен на: {new_nick}")
         else:
             await message.answer("Ты забыл написать ник.")
@@ -113,43 +123,131 @@ async def handle_messages(message: types.Message):
     elif command.startswith("описание "):
         new_desc = original_command[9:].strip()
         if new_desc:
-            user_id = str(message.from_user.id)
-            users = load_users()
-            if user_id not in users:
-                users[user_id] = {"nickname": message.from_user.username or message.from_user.first_name, "description": "", "balance": 0}
-            
-            users[user_id]["description"] = new_desc
-            save_users(users)
+            await update_user(user_id, "description", new_desc)
             await message.answer(f"Описание изменено на: {new_desc}")
         else:
             await message.answer("Ты забыл написать описание.")
 
     # --- АДМИНСКАЯ КОМАНДА (ВЫДАЧА ДЕНЕГ) ---
     elif command.startswith("выдать ") or command == "выдать":
-        # Проверка на админа (твой ID)
         if message.from_user.id != ADMIN_ID:
-            return  # Если не ты, бот просто молчит
-
+            return
         try:
-            # Пытаемся достать число из команды (например, из "выдать 676767")
             amount = int(command.split()[1])
-            
-            # Начисляем деньги тебе
-            user_id = str(message.from_user.id)
-            users = load_users()
-            
-            if user_id not in users:
-                users[user_id] = {"nickname": "", "description": "", "balance": 0}
-            
-            users[user_id]["balance"] += amount
-            save_users(users)
-            
-            await message.answer(f"Успешно начислено {amount}$. Твой баланс: {users[user_id]['balance']}$")
+            user_data = await get_user(user_id)
+            new_balance = user_data['balance'] + amount
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Успешно начислено {amount}$. Твой баланс: {new_balance}$")
         except (IndexError, ValueError):
             await message.answer("Напиши сумму. Например: еблан выдать 676767")
 
+    # --- ПЕРЕВОД ДЕНЕГ ДРУГОМУ ---
+    elif command.startswith("дать "):
+        parts = original_command[5:].strip().split() 
+        target_id = None
+        amount = 0
+
+        if message.reply_to_message:
+            target_id = message.reply_to_message.from_user.id
+            try:
+                amount = int(parts[0])
+            except (IndexError, ValueError):
+                await message.answer("Напиши сумму. Например: дать 50")
+                return
+        elif len(parts) == 2:
+            target_nickname = parts[0].replace("@", "")
+            try:
+                amount = int(parts[1])
+            except ValueError:
+                await message.answer("Напиши правильно: дать @ник 50")
+                return
+            target_id = await get_user_by_username(target_nickname)
+            if not target_id:
+                await message.answer("Я не нашел такого пользователя.")
+                return
+        else:
+            await message.answer("Напиши так: 'дать @ник 50' или ответь на сообщение и напиши 'дать 50'")
+            return
+
+        if target_id == user_id:
+            await message.answer("Ты не можешь перевести деньги самому себе.")
+            return
+        if amount <= 0:
+            await message.answer("Сумма должна быть больше нуля.")
+            return
+
+        sender_data = await get_user(user_id)
+        if sender_data['balance'] < amount:
+            await message.answer("У тебя недостаточно денег на балансе.")
+            return
+
+        target_data = await get_user(target_id)
+        await update_user(user_id, "balance", sender_data['balance'] - amount)
+        await update_user(target_id, "balance", target_data['balance'] + amount)
+        await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}.")
+
+    # --- КАЗИНО (РУЛЕТКА С ЗЕРО) ---
+    elif command.startswith("казино "):
+        parts = original_command[7:].strip().split()
+        if len(parts) != 2:
+            await message.answer("Напиши так: 'казино 100 красное' или 'казино 50 черное'")
+            return
+
+        try:
+            bet_amount = int(parts[0])
+        except ValueError:
+            await message.answer("Ставка должна быть числом.")
+            return
+
+        color = parts[1].lower()
+        if color not in ["красное", "черное", "кр", "чр"]:
+            await message.answer("Выбери цвет: 'красное' или 'черное'.")
+            return
+        
+        if color in ["кр"]: color = "красное"
+        if color in ["чр"]: color = "черное"
+
+        if bet_amount <= 0:
+            await message.answer("Ставка должна быть больше нуля.")
+            return
+
+        user_data = await get_user(user_id)
+        if user_data['balance'] < bet_amount:
+            await message.answer("У тебя недостаточно денег для такой ставки.")
+            return
+
+        # Крутим рулетку (0-36)
+        rolled_number = random.randint(0, 36)
+        
+        # Определяем цвет выпавшего числа
+        if rolled_number == 0:
+            result_color = "зеленое"
+        elif rolled_number in RED_NUMBERS:
+            result_color = "красное"
+        else:
+            result_color = "черное"
+
+        # Логика выигрыша
+        if rolled_number == 0:
+            # Зеро - казино забирает всё
+            new_balance = user_data['balance'] - bet_amount
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Выпало число {rolled_number} (Зеро). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
+        elif result_color == color:
+            # Победа (х2)
+            win_amount = bet_amount * 2
+            new_balance = user_data['balance'] + bet_amount # Возвращаем ставку + выигрыш
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Выпало {rolled_number} ({result_color}). Ты выиграл! Забрал {bet_amount}$ сверху. Баланс: {new_balance}$")
+        else:
+            # Проигрыш
+            new_balance = user_data['balance'] - bet_amount
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Вывало {rolled_number} ({result_color}). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
+
 async def main():
     print("Бот запущен...")
+    await init_db()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
