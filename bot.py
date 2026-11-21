@@ -13,6 +13,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 DB_FILE = "users.json"
+ADMIN_ID = 6185219874  # Твой Telegram ID (никому не показывай)
 
 # --- ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ---
 def load_users():
@@ -41,13 +42,13 @@ async def handle_messages(message: types.Message):
         return
 
     text = message.text.lower().strip()
-    original_text = message.text.strip() # Сохраняем оригинальный регистр для ников
+    original_text = message.text.strip()
     command = ""
 
     # Проверяем, начинается ли с "еблан"
     if text.startswith("еблан"):
         command = text[5:].strip()
-        original_command = original_text[5:].strip() # Для сохранения ников с большими буквами
+        original_command = original_text[5:].strip()
     # В ЛС или в ответ на сообщение бота можно без слова "еблан"
     elif message.chat.type == "private" or (message.reply_to_message and message.reply_to_message.from_user.id == bot.id):
         command = text
@@ -76,7 +77,6 @@ async def handle_messages(message: types.Message):
         user_id = str(message.from_user.id)
         users = load_users()
         
-        # Если пользователя нет в базе, создаем ему профиль
         if user_id not in users:
             users[user_id] = {
                 "nickname": message.from_user.username or message.from_user.first_name,
@@ -123,6 +123,30 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Описание изменено на: {new_desc}")
         else:
             await message.answer("Ты забыл написать описание.")
+
+    # --- АДМИНСКАЯ КОМАНДА (ВЫДАЧА ДЕНЕГ) ---
+    elif command.startswith("выдать ") or command == "выдать":
+        # Проверка на админа (твой ID)
+        if message.from_user.id != ADMIN_ID:
+            return  # Если не ты, бот просто молчит
+
+        try:
+            # Пытаемся достать число из команды (например, из "выдать 676767")
+            amount = int(command.split()[1])
+            
+            # Начисляем деньги тебе
+            user_id = str(message.from_user.id)
+            users = load_users()
+            
+            if user_id not in users:
+                users[user_id] = {"nickname": "", "description": "", "balance": 0}
+            
+            users[user_id]["balance"] += amount
+            save_users(users)
+            
+            await message.answer(f"Успешно начислено {amount}$. Твой баланс: {users[user_id]['balance']}$")
+        except (IndexError, ValueError):
+            await message.answer("Напиши сумму. Например: еблан выдать 676767")
 
 async def main():
     print("Бот запущен...")
