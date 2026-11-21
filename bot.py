@@ -6,7 +6,6 @@ import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
-# Токен и база из настроек Railway
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_ID = 6185219874
@@ -15,10 +14,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Стандартные красные числа в рулетке
 RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
 
-# --- РАБОТА С БАЗОЙ ДАННЫХ ---
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute('''
@@ -31,15 +28,24 @@ async def init_db():
     ''')
     await conn.close()
 
-async def get_user(user_id):
+async def get_user(user_id, tg_username=None):
     conn = await asyncpg.connect(DATABASE_URL)
     user = await conn.fetchrow('SELECT nickname, description, balance FROM users WHERE user_id = $1', user_id)
+    
     if not user:
-        # Создаем пользователя с балансом 10
+        # Если пользователя нет, создаем его с ником из ТГ (или именем), если он передан
+        default_nick = tg_username if tg_username else "Без ника"
         await conn.execute('INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)', 
-                           user_id, "Без ника", "", 10)
+                           user_id, default_nick, "", 10)
         await conn.close()
-        return {"nickname": "Без ника", "description": "", "balance": 10}
+        return {"nickname": default_nick, "description": "", "balance": 10}
+    
+    # Если пользователь есть, но у него ник "Без ника", а мы знаем его тг-ник, обновляем
+    if user['nickname'] == "Без ника" and tg_username:
+        await conn.execute('UPDATE users SET nickname = $1 WHERE user_id = $2', tg_username, user_id)
+        await conn.close()
+        return {"nickname": tg_username, "description": user['description'], "balance": user['balance']}
+        
     await conn.close()
     return dict(user)
 
@@ -58,7 +64,6 @@ async def get_user_by_username(username):
     await conn.close()
     return user['user_id'] if user else None
 
-# --- БАЗОВЫЕ КОМАНДЫ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(f"Пошел нахуй, {message.from_user.first_name}")
@@ -67,7 +72,6 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer("Иди нахуй")
 
-# --- ЛОГИКА ОБРАБОТКИ СООБЩЕНИЙ ---
 @dp.message()
 async def handle_messages(message: types.Message):
     if not message.text:
@@ -90,8 +94,8 @@ async def handle_messages(message: types.Message):
         return
 
     user_id = message.from_user.id
+    tg_username = message.from_user.username or message.from_user.first_name # Берем тг-ник или имя
 
-    # --- КОМАНДЫ ---
     if command == "привет":
         await message.answer("Привет, иди нахуй")
     elif command == "как дела":
@@ -100,17 +104,13 @@ async def handle_messages(message: types.Message):
         await message.answer("Я умею ходить нахуй")
     elif command == "иди нахуй":
         await message.answer("Сам иди нахуй")
-
-    # --- ПРОФИЛЬ ---
     elif command == "профиль":
-        user_data = await get_user(user_id)
+        user_data = await get_user(user_id, tg_username)
         profile_text = f"👤 Ник: {user_data['nickname']}\n"
         if user_data['description']:
             profile_text += f"📝 Описание: {user_data['description']}\n"
         profile_text += f"💰 Баланс: {user_data['balance']}$"
         await message.answer(profile_text)
-
-    # --- УСТАНОВКА НИКА ---
     elif command.startswith("ник "):
         new_nick = original_command[4:].strip()
         if new_nick:
@@ -118,8 +118,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Ник изменен на: {new_nick}")
         else:
             await message.answer("Ты забыл написать ник.")
-
-    # --- УСТАНОВКА ОПИСАНИЯ ---
     elif command.startswith("описание "):
         new_desc = original_command[9:].strip()
         if new_desc:
@@ -127,26 +125,21 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Описание изменено на: {new_desc}")
         else:
             await message.answer("Ты забыл написать описание.")
-
-    # --- АДМИНСКАЯ КОМАНДА (ВЫДАЧА ДЕНЕГ) ---
     elif command.startswith("выдать ") or command == "выдать":
         if message.from_user.id != ADMIN_ID:
             return
         try:
             amount = int(command.split()[1])
-            user_data = await get_user(user_id)
+            user_data = await get_user(user_id, tg_username)
             new_balance = user_data['balance'] + amount
             await update_user(user_id, "balance", new_balance)
             await message.answer(f"Успешно начислено {amount}$. Твой баланс: {new_balance}$")
         except (IndexError, ValueError):
             await message.answer("Напиши сумму. Например: еблан выдать 676767")
-
-    # --- ПЕРЕВОД ДЕНЕГ ДРУГОМУ ---
     elif command.startswith("дать "):
         parts = original_command[5:].strip().split() 
         target_id = None
         amount = 0
-
         if message.reply_to_message:
             target_id = message.reply_to_message.from_user.id
             try:
@@ -176,7 +169,7 @@ async def handle_messages(message: types.Message):
             await message.answer("Сумма должна быть больше нуля.")
             return
 
-        sender_data = await get_user(user_id)
+        sender_data = await get_user(user_id, tg_username)
         if sender_data['balance'] < amount:
             await message.answer("У тебя недостаточно денег на балансе.")
             return
@@ -185,41 +178,31 @@ async def handle_messages(message: types.Message):
         await update_user(user_id, "balance", sender_data['balance'] - amount)
         await update_user(target_id, "balance", target_data['balance'] + amount)
         await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}.")
-
-    # --- КАЗИНО (РУЛЕТКА С ЗЕРО) ---
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
         if len(parts) != 2:
             await message.answer("Напиши так: 'казино 100 красное' или 'казино 50 черное'")
             return
-
         try:
             bet_amount = int(parts[0])
         except ValueError:
             await message.answer("Ставка должна быть числом.")
             return
-
         color = parts[1].lower()
         if color not in ["красное", "черное", "кр", "чр"]:
             await message.answer("Выбери цвет: 'красное' или 'черное'.")
             return
-        
         if color in ["кр"]: color = "красное"
         if color in ["чр"]: color = "черное"
-
         if bet_amount <= 0:
             await message.answer("Ставка должна быть больше нуля.")
             return
-
-        user_data = await get_user(user_id)
+        user_data = await get_user(user_id, tg_username)
         if user_data['balance'] < bet_amount:
             await message.answer("У тебя недостаточно денег для такой ставки.")
             return
 
-        # Крутим рулетку (0-36)
         rolled_number = random.randint(0, 36)
-        
-        # Определяем цвет выпавшего числа
         if rolled_number == 0:
             result_color = "зеленое"
         elif rolled_number in RED_NUMBERS:
@@ -227,23 +210,19 @@ async def handle_messages(message: types.Message):
         else:
             result_color = "черное"
 
-        # Логика выигрыша
         if rolled_number == 0:
-            # Зеро - казино забирает всё
             new_balance = user_data['balance'] - bet_amount
             await update_user(user_id, "balance", new_balance)
             await message.answer(f"Выпало число {rolled_number} (Зеро). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
         elif result_color == color:
-            # Победа (х2)
             win_amount = bet_amount * 2
-            new_balance = user_data['balance'] + bet_amount # Возвращаем ставку + выигрыш
+            new_balance = user_data['balance'] + bet_amount
             await update_user(user_id, "balance", new_balance)
             await message.answer(f"Выпало {rolled_number} ({result_color}). Ты выиграл! Забрал {bet_amount}$ сверху. Баланс: {new_balance}$")
         else:
-            # Проигрыш
             new_balance = user_data['balance'] - bet_amount
             await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Вывало {rolled_number} ({result_color}). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
+            await message.answer(f"Выпало {rolled_number} ({result_color}). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
 
 async def main():
     print("Бот запущен...")
