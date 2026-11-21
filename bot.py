@@ -5,6 +5,7 @@ import random
 import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -115,7 +116,7 @@ async def handle_messages(message: types.Message):
             await update_user(user_id, "nickname", new_nick)
             await message.answer(f"Ник изменен на: {new_nick}")
         else:
-            await message.answer("Ты забыл написать ник.")
+            await message.answer("Ты забыл написать ник")
     
     elif command.startswith("описание "):
         new_desc = original_command[9:].strip()
@@ -123,7 +124,7 @@ async def handle_messages(message: types.Message):
             await update_user(user_id, "description", new_desc)
             await message.answer(f"Описание изменено на: {new_desc}")
         else:
-            await message.answer("Ты забыл написать описание.")
+            await message.answer("Ты забыл написать описание")
     
     elif command.startswith("выдать ") or command == "выдать":
         if message.from_user.id != ADMIN_ID:
@@ -158,17 +159,17 @@ async def handle_messages(message: types.Message):
                 return
             target_id = await get_user_by_username(target_nickname)
             if not target_id:
-                await message.answer("Я не нашел такого пользователя.")
+                await message.answer("Я не нашел такого пользователя")
                 return
         else:
             await message.answer("Блин дурак напиши еблан потом дать потом короче юзернейм и потом число еще короче можно в ответ ему написать типо еблан дать 67")
             return
 
         if target_id == user_id:
-            await message.answer("Ты не можешь перевести деньги самому себе.")
+            await message.answer("Ты не можешь перевести деньги самому себе")
             return
         if amount <= 0:
-            await message.answer("Сумма должна быть больше нуля.")
+            await message.answer("Сумма должна быть больше нуля")
             return
 
         sender_data = await get_user(user_id, tg_username)
@@ -179,8 +180,33 @@ async def handle_messages(message: types.Message):
         target_data = await get_user(target_id)
         await update_user(user_id, "balance", sender_data["balance"] - amount)
         await update_user(target_id, "balance", target_data["balance"] + amount)
-        await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}.")
-    
+        
+        await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}")
+
+        # ЛОГИКА УВЕДОМЛЕНИЯ
+        send_notification = False
+        
+        if message.chat.type == "private":
+            # Если перевод в ЛС, уведомляем всегда
+            send_notification = True
+        else:
+            # Если перевод в чате, проверяем, есть ли получатель в этом чате
+            try:
+                member = await bot.get_chat_member(chat_id=message.chat.id, user_id=target_id)
+                # Если статус 'left' или 'kicked', значит его нет в чате
+                if member.status in ["left", "kicked"]:
+                    send_notification = True
+            except TelegramBadRequest:
+                # Если не удалось проверить, на всякий случай уведомляем
+                send_notification = True
+
+        if send_notification:
+            try:
+                await bot.send_message(target_id, f"вам прислали {amount}")
+            except (TelegramForbiddenError, TelegramBadRequest):
+                # Если получатель заблокировал бота или не запускал его, просто игнорируем ошибку
+                pass
+
     # --- КАЗИНО ---
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
@@ -199,7 +225,7 @@ async def handle_messages(message: types.Message):
         if color in ["кр"]: color = "красное"
         if color in ["чр"]: color = "черное"
         if bet_amount <= 0:
-            await message.answer("Сумма должна быть больше нуля.")
+            await message.answer("Сумма должна быть больше нуля")
             return
         
         user_data = await get_user(user_id, tg_username)
