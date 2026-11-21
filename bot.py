@@ -14,8 +14,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-RED_NUMBERS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
-
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute('''
@@ -33,14 +31,12 @@ async def get_user(user_id, tg_username=None):
     user = await conn.fetchrow('SELECT nickname, description, balance FROM users WHERE user_id = $1', user_id)
     
     if not user:
-        # Если пользователя нет, создаем его с ником из ТГ (или именем), если он передан
         default_nick = tg_username if tg_username else "Без ника"
         await conn.execute('INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)', 
                            user_id, default_nick, "", 10)
         await conn.close()
         return {"nickname": default_nick, "description": "", "balance": 10}
     
-    # Если пользователь есть, но у него ник "Без ника", а мы знаем его тг-ник, обновляем
     if user['nickname'] == "Без ника" and tg_username:
         await conn.execute('UPDATE users SET nickname = $1 WHERE user_id = $2', tg_username, user_id)
         await conn.close()
@@ -94,7 +90,7 @@ async def handle_messages(message: types.Message):
         return
 
     user_id = message.from_user.id
-    tg_username = message.from_user.username or message.from_user.first_name # Берем тг-ник или имя
+    tg_username = message.from_user.username or message.from_user.first_name
 
     if command == "привет":
         await message.answer("Привет, иди нахуй")
@@ -178,6 +174,8 @@ async def handle_messages(message: types.Message):
         await update_user(user_id, "balance", sender_data['balance'] - amount)
         await update_user(target_id, "balance", target_data['balance'] + amount)
         await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}.")
+    
+    # --- КАЗИНО 50/50 БЕЗ ЦИФР И ЗЕРО ---
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
         if len(parts) != 2:
@@ -202,32 +200,15 @@ async def handle_messages(message: types.Message):
             await message.answer("У тебя недостаточно денег для такой ставки.")
             return
 
-        rolled_number = random.randint(0, 36)
-        if rolled_number == 0:
-            result_color = "зеленое"
-        elif rolled_number in RED_NUMBERS:
-            result_color = "красное"
-        else:
-            result_color = "черное"
+        # Чистый 50 на 50
+        result_color = random.choice(["красное", "черное"])
 
-        if rolled_number == 0:
-            new_balance = user_data['balance'] - bet_amount
-            await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Выпало число {rolled_number} (Зеро). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
-        elif result_color == color:
+        if result_color == color:
             win_amount = bet_amount * 2
             new_balance = user_data['balance'] + bet_amount
             await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Выпало {rolled_number} ({result_color}). Ты выиграл! Забрал {bet_amount}$ сверху. Баланс: {new_balance}$")
+            await message.answer(f"Выпало {result_color}. Ты победил блин молодец")
         else:
             new_balance = user_data['balance'] - bet_amount
             await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Выпало {rolled_number} ({result_color}). Ты проиграл {bet_amount}$. Баланс: {new_balance}$")
-
-async def main():
-    print("Бот запущен...")
-    await init_db()
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            await message.answer(f"Выпало {result_color}. Ты проебал лузер ебаный ахаха соси")
