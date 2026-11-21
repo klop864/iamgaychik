@@ -174,8 +174,6 @@ async def handle_messages(message: types.Message):
         await update_user(user_id, "balance", sender_data['balance'] - amount)
         await update_user(target_id, "balance", target_data['balance'] + amount)
         await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}.")
-    
-    # --- КАЗИНО 50/50 БЕЗ ЦИФР И ЗЕРО ---
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
         if len(parts) != 2:
@@ -200,11 +198,9 @@ async def handle_messages(message: types.Message):
             await message.answer("У тебя недостаточно денег для такой ставки.")
             return
 
-        # Чистый 50 на 50
         result_color = random.choice(["красное", "черное"])
 
         if result_color == color:
-            win_amount = bet_amount * 2
             new_balance = user_data['balance'] + bet_amount
             await update_user(user_id, "balance", new_balance)
             await message.answer(f"Выпало {result_color}. Ты победил блин молодец")
@@ -212,3 +208,11 @@ async def handle_messages(message: types.Message):
             new_balance = user_data['balance'] - bet_amount
             await update_user(user_id, "balance", new_balance)
             await message.answer(f"Выпало {result_color}. Ты проебал лузер ебаный ахаха соси")
+
+async def main():
+    print("Бот запущен...")
+    await init_db()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
