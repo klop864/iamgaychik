@@ -74,6 +74,34 @@ async def handle_messages(message: types.Message):
     if not message.text:
         return
 
+    # Передача сообщений работает только в ЛС
+    if message.chat.type == "private":
+        text_to_check = message.text.strip()
+        if text_to_check.lower().startswith("еблан передай "):
+            text_to_check = text_to_check[13:].strip()
+        elif text_to_check.lower().startswith("передай "):
+            text_to_check = text_to_check[7:].strip()
+        else:
+            text_to_check = None
+
+        if text_to_check:
+            parts = text_to_check.split(maxsplit=1)
+            if len(parts) == 2:
+                target_username = parts[0].replace("@", "")
+                msg_text = parts[1]
+                try:
+                    # Отправляем просто текст без приставок
+                    await bot.send_message(chat_id=f"@{target_username}", text=msg_text)
+                    await message.answer("Сообщение передано")
+                except TelegramBadRequest:
+                    await message.answer("Я не нашел такого пользователя или он не запускал бота")
+                except TelegramForbiddenError:
+                    await message.answer("Этот пользователь заблокировал бота")
+                return
+            else:
+                await message.answer("Напиши так: еблан передай @юзернейм [текст сообщения]")
+                return
+
     text = message.text.lower().strip()
     original_text = message.text.strip()
     command = ""
@@ -138,7 +166,6 @@ async def handle_messages(message: types.Message):
         except (IndexError, ValueError):
             await message.answer("Напиши сумму. Например: еблан выдать 676767")
     
-    # --- ПЕРЕВОД ДЕНЕГ ---
     elif command.startswith("дать "):
         parts = original_command[5:].strip().split() 
         target_id = None
@@ -183,31 +210,23 @@ async def handle_messages(message: types.Message):
         
         await message.answer(f"Успешно переведено {amount}$ пользователю {target_data['nickname']}")
 
-        # ЛОГИКА УВЕДОМЛЕНИЯ
         send_notification = False
-        
         if message.chat.type == "private":
-            # Если перевод в ЛС, уведомляем всегда
             send_notification = True
         else:
-            # Если перевод в чате, проверяем, есть ли получатель в этом чате
             try:
                 member = await bot.get_chat_member(chat_id=message.chat.id, user_id=target_id)
-                # Если статус 'left' или 'kicked', значит его нет в чате
                 if member.status in ["left", "kicked"]:
                     send_notification = True
             except TelegramBadRequest:
-                # Если не удалось проверить, на всякий случай уведомляем
                 send_notification = True
 
         if send_notification:
             try:
                 await bot.send_message(target_id, f"вам прислали {amount}")
             except (TelegramForbiddenError, TelegramBadRequest):
-                # Если получатель заблокировал бота или не запускал его, просто игнорируем ошибку
                 pass
 
-    # --- КАЗИНО ---
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
         if len(parts) != 2:
