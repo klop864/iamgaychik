@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+import json
 import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -15,17 +16,28 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Файл для хранения юзернеймов и ID
+USERS_FILE = "usernames.json"
+
+def load_usernames():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_usernames(data):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# --- БАЗА ДАННЫХ ДЛЯ БАЛАНСОВ (остается) ---
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
-    # ВНИМАНИЕ: Удаляем старую таблицу, чтобы создать новую с tg_username
-    await conn.execute("DROP TABLE IF EXISTS users")
     await conn.execute("""
-        CREATE TABLE users (
+        CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
             nickname TEXT,
             description TEXT,
-            balance BIGINT DEFAULT 10,
-            tg_username TEXT
+            balance BIGINT DEFAULT 10
         )
     """)
     await conn.close()
@@ -36,20 +48,16 @@ async def get_user(user_id, tg_username=None):
     
     if not user:
         default_nick = tg_username if tg_username else "Без ника"
-        await conn.execute("INSERT INTO users (user_id, nickname, description, balance, tg_username) VALUES ($1, $2, $3, $4, $5)", 
-                           user_id, default_nick, "", 10, tg_username)
+        await conn.execute("INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)", 
+                           user_id, default_nick, "", 10)
         await conn.close()
         return {"nickname": default_nick, "description": "", "balance": 10}
     
     if user["nickname"] == "Без ника" and tg_username:
-        await conn.execute("UPDATE users SET nickname = $1, tg_username = $2 WHERE user_id = $3", tg_username, tg_username, user_id)
+        await conn.execute("UPDATE users SET nickname = $1 WHERE user_id = $2", tg_username, user_id)
         await conn.close()
         return {"nickname": tg_username, "description": user["description"], "balance": user["balance"]}
         
-    # Обновляем тг-юзернейм на всякий случай (если изменился)
-    if tg_username:
-        await conn.execute("UPDATE users SET tg_username = $1 WHERE user_id = $2", tg_username, user_id)
-
     await conn.close()
     return dict(user)
 
@@ -62,18 +70,33 @@ async def update_user(user_id, field, value):
     await conn.execute(query, value, user_id)
     await conn.close()
 
+# --- БАЗА ДЛЯ НИКОВ (JSON) ---
 async def get_user_by_username(username):
+    users = load_usernames()
+    # Ищем по юзернейму (без @)
+    username = username.replace("@", "")
+    if username in users:
+        return users[username]
+    
+    # Ищем по нику из базы (если вдруг написали ник из бота)
     conn = await asyncpg.connect(DATABASE_URL)
-    # Ищем по нику в боте (nickname) или по тг-юзернейму (tg_username)
-    user = await conn.fetchrow("SELECT user_id FROM users WHERE nickname = $1 OR tg_username = $1", username)
+    user = await conn.fetchrow("SELECT user_id FROM users WHERE nickname = $1", username)
     await conn.close()
     return user["user_id"] if user else None
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    tg_username = message.from_user.username or message.from_user.first_name
-    await get_user(user_id, tg_username) # Сохраняем в базу
+    tg_username = message.from_user.username
+    
+    if tg_username:
+        # Сохраняем в JSON
+        users = load_usernames()
+        users[tg_username.lower()] = user_id
+        save_usernames(users)
+        
+    # Сохраняем в базу для профиля
+    await get_user(user_id, tg_username or message.from_user.first_name)
     await message.answer(f"Пошел нахуй, {message.from_user.first_name}")
 
 @dp.message(Command("help"))
@@ -85,7 +108,7 @@ async def handle_messages(message: types.Message):
     if not message.text:
         return
 
-    # Передача сообщений работает только в ЛС
+    # Передача сообщений только в ЛС
     if message.chat.type == "private":
         text_to_check = message.text.strip()
         if text_to_check.lower().startswith("еблан передай "):
@@ -98,10 +121,9 @@ async def handle_messages(message: types.Message):
         if text_to_check:
             parts = text_to_check.split(maxsplit=1)
             if len(parts) == 2:
-                target_username = parts[0].replace("@", "")
+                target_username = parts[0].replace("@", "").lower()
                 msg_text = parts[1]
                 
-                # Ищем ID пользователя в базе по юзернейму
                 target_id = await get_user_by_username(target_username)
                 
                 if not target_id:
@@ -139,7 +161,7 @@ async def handle_messages(message: types.Message):
     user_id = message.from_user.id
     tg_username = message.from_user.username or message.from_user.first_name
 
-    await get_user(user_id, tg_username) # Обновляем данные
+    await get_user(user_id, tg_username)
 
     if command == "привет":
         await message.answer("Привет, иди нахуй")
@@ -149,7 +171,6 @@ async def handle_messages(message: types.Message):
         await message.answer("Я умею ходить нахуй")
     elif command == "иди нахуй":
         await message.answer("Сам иди нахуй")
-    
     elif command == "профиль":
         user_data = await get_user(user_id, tg_username)
         profile_text = f"👤 Ник: {user_data['nickname']}\n"
@@ -157,7 +178,6 @@ async def handle_messages(message: types.Message):
             profile_text += f"📝 Описание: {user_data['description']}\n"
         profile_text += f"💰 Баланс: {user_data['balance']}$"
         await message.answer(profile_text)
-    
     elif command.startswith("ник "):
         new_nick = original_command[4:].strip()
         if new_nick:
@@ -165,7 +185,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Ник изменен на: {new_nick}")
         else:
             await message.answer("Ты забыл написать ник")
-    
     elif command.startswith("описание "):
         new_desc = original_command[9:].strip()
         if new_desc:
@@ -173,7 +192,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Описание изменено на: {new_desc}")
         else:
             await message.answer("Ты забыл написать описание")
-    
     elif command.startswith("выдать ") or command == "выдать":
         if message.from_user.id != ADMIN_ID:
             return
@@ -185,7 +203,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Успешно начислено {amount}$. Твой баланс: {new_balance}$")
         except (IndexError, ValueError):
             await message.answer("Напиши сумму. Например: еблан выдать 676767")
-    
     elif command.startswith("дать "):
         parts = original_command[5:].strip().split() 
         target_id = None
