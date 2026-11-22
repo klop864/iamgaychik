@@ -17,8 +17,10 @@ dp = Dispatcher()
 
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
+    # ВНИМАНИЕ: Удаляем старую таблицу, чтобы создать новую с tg_username
+    await conn.execute("DROP TABLE IF EXISTS users")
     await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             user_id BIGINT PRIMARY KEY,
             nickname TEXT,
             description TEXT,
@@ -26,11 +28,6 @@ async def init_db():
             tg_username TEXT
         )
     """)
-    # Добавляем колонку tg_username, если её еще нет (для старых баз)
-    try:
-        await conn.execute("ALTER TABLE users ADD COLUMN tg_username TEXT")
-    except Exception:
-        pass
     await conn.close()
 
 async def get_user(user_id, tg_username=None):
@@ -49,6 +46,10 @@ async def get_user(user_id, tg_username=None):
         await conn.close()
         return {"nickname": tg_username, "description": user["description"], "balance": user["balance"]}
         
+    # Обновляем тг-юзернейм на всякий случай (если изменился)
+    if tg_username:
+        await conn.execute("UPDATE users SET tg_username = $1 WHERE user_id = $2", tg_username, user_id)
+
     await conn.close()
     return dict(user)
 
@@ -70,10 +71,9 @@ async def get_user_by_username(username):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    # Сохраняем юзернейм в базу при старте
     user_id = message.from_user.id
     tg_username = message.from_user.username or message.from_user.first_name
-    await get_user(user_id, tg_username)
+    await get_user(user_id, tg_username) # Сохраняем в базу
     await message.answer(f"Пошел нахуй, {message.from_user.first_name}")
 
 @dp.message(Command("help"))
@@ -98,14 +98,14 @@ async def handle_messages(message: types.Message):
         if text_to_check:
             parts = text_to_check.split(maxsplit=1)
             if len(parts) == 2:
-                target_username = parts[0].replace("@", "") # убираем @
+                target_username = parts[0].replace("@", "")
                 msg_text = parts[1]
                 
                 # Ищем ID пользователя в базе по юзернейму
                 target_id = await get_user_by_username(target_username)
                 
                 if not target_id:
-                    await message.answer(f"Пользователь @{target_username} не найден. Пусть он сначала нажмет /start в боте")
+                    await message.answer("Пользователь ушел нахуй")
                     return
 
                 try:
@@ -139,8 +139,7 @@ async def handle_messages(message: types.Message):
     user_id = message.from_user.id
     tg_username = message.from_user.username or message.from_user.first_name
 
-    # Обновляем юзернейм в базе при каждом сообщении (на случай, если он изменился)
-    await get_user(user_id, tg_username)
+    await get_user(user_id, tg_username) # Обновляем данные
 
     if command == "привет":
         await message.answer("Привет, иди нахуй")
@@ -207,7 +206,7 @@ async def handle_messages(message: types.Message):
                 return
             target_id = await get_user_by_username(target_nickname)
             if not target_id:
-                await message.answer("Я не нашел такого пользователя")
+                await message.answer("Пользователь ушел нахуй")
                 return
         else:
             await message.answer("Блин дурак напиши еблан потом дать потом короче юзернейм и потом число еще короче можно в ответ ему написать типо еблан дать 67")
