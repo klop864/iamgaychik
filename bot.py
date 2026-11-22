@@ -90,8 +90,12 @@ async def handle_messages(message: types.Message):
                 target_username = parts[0].replace("@", "")
                 msg_text = parts[1]
                 try:
-                    # Отправляем просто текст без приставок
-                    await bot.send_message(chat_id=f"@{target_username}", text=msg_text)
+                    # Пытаемся получить ID пользователя по юзернейму
+                    chat = await bot.get_chat(f"@{target_username}")
+                    target_id = chat.id
+                    
+                    # Отправляем сообщение по ID
+                    await bot.send_message(chat_id=target_id, text=msg_text)
                     await message.answer("Сообщение передано")
                 except TelegramBadRequest:
                     await message.answer("Я не нашел такого пользователя или он не запускал бота")
