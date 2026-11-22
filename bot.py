@@ -22,9 +22,15 @@ async def init_db():
             user_id BIGINT PRIMARY KEY,
             nickname TEXT,
             description TEXT,
-            balance BIGINT DEFAULT 10
+            balance BIGINT DEFAULT 10,
+            tg_username TEXT
         )
     """)
+    # Добавляем колонку tg_username, если её еще нет (для старых баз)
+    try:
+        await conn.execute("ALTER TABLE users ADD COLUMN tg_username TEXT")
+    except Exception:
+        pass
     await conn.close()
 
 async def get_user(user_id, tg_username=None):
@@ -33,13 +39,13 @@ async def get_user(user_id, tg_username=None):
     
     if not user:
         default_nick = tg_username if tg_username else "Без ника"
-        await conn.execute("INSERT INTO users (user_id, nickname, description, balance) VALUES ($1, $2, $3, $4)", 
-                           user_id, default_nick, "", 10)
+        await conn.execute("INSERT INTO users (user_id, nickname, description, balance, tg_username) VALUES ($1, $2, $3, $4, $5)", 
+                           user_id, default_nick, "", 10, tg_username)
         await conn.close()
         return {"nickname": default_nick, "description": "", "balance": 10}
     
     if user["nickname"] == "Без ника" and tg_username:
-        await conn.execute("UPDATE users SET nickname = $1 WHERE user_id = $2", tg_username, user_id)
+        await conn.execute("UPDATE users SET nickname = $1, tg_username = $2 WHERE user_id = $3", tg_username, tg_username, user_id)
         await conn.close()
         return {"nickname": tg_username, "description": user["description"], "balance": user["balance"]}
         
@@ -57,12 +63,17 @@ async def update_user(user_id, field, value):
 
 async def get_user_by_username(username):
     conn = await asyncpg.connect(DATABASE_URL)
-    user = await conn.fetchrow("SELECT user_id FROM users WHERE nickname = $1", username)
+    # Ищем по нику в боте (nickname) или по тг-юзернейму (tg_username)
+    user = await conn.fetchrow("SELECT user_id FROM users WHERE nickname = $1 OR tg_username = $1", username)
     await conn.close()
     return user["user_id"] if user else None
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    # Сохраняем юзернейм в базу при старте
+    user_id = message.from_user.id
+    tg_username = message.from_user.username or message.from_user.first_name
+    await get_user(user_id, tg_username)
     await message.answer(f"Пошел нахуй, {message.from_user.first_name}")
 
 @dp.message(Command("help"))
@@ -87,18 +98,21 @@ async def handle_messages(message: types.Message):
         if text_to_check:
             parts = text_to_check.split(maxsplit=1)
             if len(parts) == 2:
-                target_username = parts[0].replace("@", "")
+                target_username = parts[0].replace("@", "") # убираем @
                 msg_text = parts[1]
+                
+                # Ищем ID пользователя в базе по юзернейму
+                target_id = await get_user_by_username(target_username)
+                
+                if not target_id:
+                    await message.answer(f"Пользователь @{target_username} не найден. Пусть он сначала нажмет /start в боте")
+                    return
+
                 try:
-                    # Пытаемся получить ID пользователя по юзернейму
-                    chat = await bot.get_chat(f"@{target_username}")
-                    target_id = chat.id
-                    
-                    # Отправляем сообщение по ID
                     await bot.send_message(chat_id=target_id, text=msg_text)
                     await message.answer("Сообщение передано")
                 except TelegramBadRequest:
-                    await message.answer("Я не нашел такого пользователя или он не запускал бота")
+                    await message.answer("Ошибка отправки. Возможно, пользователь заблокировал бота")
                 except TelegramForbiddenError:
                     await message.answer("Этот пользователь заблокировал бота")
                 return
@@ -124,6 +138,9 @@ async def handle_messages(message: types.Message):
 
     user_id = message.from_user.id
     tg_username = message.from_user.username or message.from_user.first_name
+
+    # Обновляем юзернейм в базе при каждом сообщении (на случай, если он изменился)
+    await get_user(user_id, tg_username)
 
     if command == "привет":
         await message.answer("Привет, иди нахуй")
