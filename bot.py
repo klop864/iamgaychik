@@ -450,4 +450,13 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Выпало {result_color}. Ты победил блин молодец")
         else:
             new_balance = user_data["balance"] - bet_amount
-            await update_user(user_id, "balanc
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Выпало {result_color}. Ты проебал лузер ебаный ахаха соси")
+
+async def main():
+    print("Бот запущен...")
+    await init_db()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
