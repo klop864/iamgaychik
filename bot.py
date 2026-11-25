@@ -11,7 +11,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-ADMIN_ID = 6185219874 # Твой ID (Верховный админ)
+ADMIN_ID = 6185219874 # Твой ID
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -31,7 +31,6 @@ def save_usernames(data):
 
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
-    # Глобальная база пользователей (баланс, награды)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -43,7 +42,6 @@ async def init_db():
             awards TEXT
         )
     """)
-    # База рангов для каждого чата отдельно
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_ranks (
             chat_id BIGINT,
@@ -55,7 +53,6 @@ async def init_db():
     """)
     await conn.close()
 
-# Функции для глобальной базы (баланс, награды)
 async def get_user(user_id, tg_username=None):
     conn = await asyncpg.connect(DATABASE_URL)
     user = await conn.fetchrow("SELECT nickname, description, balance, warns, last_warn_time, awards FROM users WHERE user_id = $1", user_id)
@@ -84,7 +81,6 @@ async def update_user(user_id, field, value):
     await conn.execute(query, value, user_id)
     await conn.close()
 
-# Функции для рангов в чатах
 async def get_chat_rank(chat_id, user_id):
     conn = await asyncpg.connect(DATABASE_URL)
     row = await conn.fetchrow("SELECT rank FROM chat_ranks WHERE chat_id = $1 AND user_id = $2", chat_id, user_id)
@@ -164,12 +160,9 @@ async def handle_messages(message: types.Message):
     tg_username = message.from_user.username or message.from_user.first_name
     user_data = await get_user(user_id, tg_username)
     
-    # Получаем ранг в ЭТОМ чате
     user_rank = 0
     if not is_private:
         user_rank = await get_chat_rank(chat_id, user_id)
-        
-        # Если создатель чата пишет команду, проверяем его ранг
         try:
             chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if chat_member.status == "creator":
@@ -179,12 +172,10 @@ async def handle_messages(message: types.Message):
         except Exception:
             pass
 
-    # --- СИСТЕМА РАНГОВ ---
     if command == "админы":
         if is_private:
             await message.answer("Эта команда работает только в чатах")
             return
-            
         conn = await asyncpg.connect(DATABASE_URL)
         admins = await conn.fetch("SELECT user_id, rank FROM chat_ranks WHERE chat_id = $1 AND rank > 0 ORDER BY rank DESC", chat_id)
         await conn.close()
@@ -205,7 +196,6 @@ async def handle_messages(message: types.Message):
             await message.answer(text_out)
         return
 
-    # Смена названия ранга (например: 2 админ Главный Олух)
     if user_rank == 5 or user_id == ADMIN_ID:
         if text.startswith(("1 админ", "2 админ", "3 админ", "4 админ", "5 админ")):
             parts = original_command.split(maxsplit=2)
@@ -222,7 +212,6 @@ async def handle_messages(message: types.Message):
         if user_rank < 5 and user_id != ADMIN_ID:
             await message.answer("У тебя нет прав для этого")
             return
-        
         parts = original_command.split()
         action = parts[0].lower()
         target_id = None
@@ -259,11 +248,9 @@ async def handle_messages(message: types.Message):
         return
 
     if command.startswith("наградить "):
-        # Награждать может только 1 ранг и выше в чате (или создатель бота)
         if user_rank < 1 and user_id != ADMIN_ID:
             await message.answer("У тебя нет прав для этого")
             return
-        
         parts = original_command.split(maxsplit=2)
         target_id = None
         target_username = None
@@ -286,7 +273,6 @@ async def handle_messages(message: types.Message):
             return
 
         target_data = await get_user(target_id)
-        # Проверка: нельзя награждать тех, кто выше тебя по рангу в этом чате
         target_rank = await get_chat_rank(chat_id, target_id)
         if user_id != ADMIN_ID and target_rank > user_rank:
             await message.answer("Ты не можешь награждать тех, кто выше тебя")
@@ -298,7 +284,6 @@ async def handle_messages(message: types.Message):
         await message.answer(f"@{target_username} получил награду: {award_text}")
         return
 
-    # --- МОДЕРАЦИЯ ---
     if command.startswith(("бан ", "мут ", "варн ", "варны ")):
         action = command.split()[0]
         req_rank = {"бан": 4, "мут": 3, "варн": 2, "варны": 2}.get(action, 0)
@@ -384,7 +369,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"У @{target_username} сейчас {warns}/5 варнов")
         return
 
-    # --- ОСТАЛЬНОЕ ---
     if command == "профиль":
         profile_text = f"👤 Ник: {user_data['nickname']}\n"
         if user_data["description"]: profile_text += f"📝 Описание: {user_data['description']}\n"
@@ -413,7 +397,6 @@ async def handle_messages(message: types.Message):
             await message.answer(f"Начислено {amount}$. Баланс: {new_balance}$")
         except: pass
     elif command.startswith("дать "):
-        # Логика перевода денег (без изменений)
         parts = original_command[5:].strip().split() 
         target_id = None
         amount = 0
@@ -437,7 +420,6 @@ async def handle_messages(message: types.Message):
         await update_user(target_id, "balance", target_data["balance"] + amount)
         await message.answer(f"Переведено {amount}$ пользователю {target_data['nickname']}")
     elif command.startswith("казино "):
-        # Логика казино (без изменений)
         parts = original_command[7:].strip().split()
         if len(parts) != 2: await message.answer("Блин дурак напиши еблан потом казино потом свою ставку и красное или черное это типа на какой цвет ты ставишь понял да"); return
         try: bet_amount = int(parts[0])
@@ -449,4 +431,19 @@ async def handle_messages(message: types.Message):
         if bet_amount <= 0: await message.answer("Больше нуля"); return
         if user_data["balance"] < bet_amount: await message.answer("ты бомж ахах"); return
         result_color = random.choice(["красное", "черное"])
-        if result_color == col
+        if result_color == color:
+            new_balance = user_data["balance"] + bet_amount
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Выпало {result_color}. Ты победил блин молодец")
+        else:
+            new_balance = user_data["balance"] - bet_amount
+            await update_user(user_id, "balance", new_balance)
+            await message.answer(f"Выпало {result_color}. Ты проебал лузер ебаный ахаха соси")
+
+async def main():
+    print("Бот запущен...")
+    await init_db()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
