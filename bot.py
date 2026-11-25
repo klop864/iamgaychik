@@ -117,7 +117,15 @@ async def unban_task(chat_id, user_id, delay, username):
     await asyncio.sleep(delay)
     try:
         await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
-        await bot.send_message(chat_id, f"ахах разбанили лоха @{username}")
+        await bot.send_message(chat_id, f"Ахах разбанили лоха @{username}")
+    except Exception: pass
+
+async def unmute_task(chat_id, user_id, delay, username):
+    await asyncio.sleep(delay)
+    try:
+        permissions = types.ChatPermissions(can_send_messages=True)
+        await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions)
+        await bot.send_message(chat_id, f"Ахах размутили лоха @{username}")
     except Exception: pass
 
 @dp.message(Command("start"))
@@ -193,9 +201,9 @@ async def handle_messages(message: types.Message):
         admins = await conn.fetch("SELECT user_id, rank FROM chat_ranks WHERE chat_id = $1 AND rank > 0 ORDER BY rank DESC", chat_id)
         await conn.close()
         
-        text_out = "админы олухи\n"
+        text_out = "Админы олухи\n"
         for r in range(5, 0, -1):
-            admin_ids = [a['user_id'] for a in admins if a['rank'] == r]
+            admin_ids = [a["user_id"] for a in admins if a["rank"] == r]
             if admin_ids:
                 names = []
                 for a_id in admin_ids:
@@ -203,13 +211,12 @@ async def handle_messages(message: types.Message):
                     names.append(a_data["nickname"])
                 text_out += f"{r} - {', '.join(names)}\n"
         
-        if text_out == "админы олухи\n":
+        if text_out == "Админы олухи\n":
             await message.answer("Админов нет")
         else:
-            await message.answer(text_out)
+            await message.answer(text_out.strip())
         return
 
-    # Исправленная проверка смены названия ранга!
     if user_rank == 5 or user_id == ADMIN_ID:
         parts = command.split(maxsplit=2)
         if len(parts) == 3 and parts[0] in ["1", "2", "3", "4", "5"] and parts[1] == "админ":
@@ -218,12 +225,12 @@ async def handle_messages(message: types.Message):
             conn = await asyncpg.connect(DATABASE_URL)
             await conn.execute("UPDATE chat_ranks SET rank_name = $1 WHERE chat_id = $2 AND rank = $3", r_name, chat_id, r_num)
             await conn.close()
-            await message.answer(f"Ранг {r_num} в этом чате теперь называется '{r_name}'")
+            await message.answer("Оккккк")
             return
 
     if command.startswith(("назначить ", "разжаловать ")):
         if user_rank < 5 and user_id != ADMIN_ID:
-            await message.answer("У тебя нет прав для этого")
+            await message.answer("Ты слишком маленький для такого")
             return
         parts = original_command.split()
         action = parts[0].lower()
@@ -250,23 +257,23 @@ async def handle_messages(message: types.Message):
 
         target_rank = await get_chat_rank(chat_id, target_id)
         if user_id != ADMIN_ID and target_rank > user_rank:
-            await message.answer("Ты не можешь трогать тех, кто выше тебя")
+            await message.answer("Ты слишком маленький для такого")
             return
 
         if action == "назначить":
             if not (1 <= new_rank <= 5):
-                await message.answer("Ранг должен быть от 1 до 5")
+                await message.answer("Там толька 1-5 можна пон")
                 return
             await set_chat_rank(chat_id, target_id, new_rank)
-            await message.answer(f"@{target_username} стал олухом {new_rank}")
+            await message.answer(f"@{target_username} стал олухом")
         elif action == "разжаловать":
             await set_chat_rank(chat_id, target_id, 0)
-            await message.answer(f"@{target_username} разжалован")
+            await message.answer("Ахах лох")
         return
 
     if command.startswith("наградить "):
         if user_rank < 1 and user_id != ADMIN_ID:
-            await message.answer("У тебя нет прав для этого")
+            await message.answer("Ты слишком маленький для такого")
             return
         parts = original_command.split(maxsplit=2)
         target_id = None
@@ -292,13 +299,13 @@ async def handle_messages(message: types.Message):
         target_data = await get_user(target_id)
         target_rank = await get_chat_rank(chat_id, target_id)
         if user_id != ADMIN_ID and target_rank > user_rank:
-            await message.answer("Ты не можешь награждать тех, кто выше тебя")
+            await message.answer("Ты слишком маленький для такого")
             return
 
         current_awards = target_data["awards"]
         new_awards = f"{current_awards}\n{award_text}" if current_awards else award_text
         await update_user(target_id, "awards", new_awards)
-        await message.answer(f"@{target_username} получил награду: {award_text}")
+        await message.answer("Награда выдана, хозяин!~")
         return
 
     if command.startswith(("бан ", "мут ", "варн ", "варны ")):
@@ -306,7 +313,7 @@ async def handle_messages(message: types.Message):
         req_rank = {"бан": 4, "мут": 3, "варн": 2, "варны": 2}.get(action, 0)
         
         if user_rank < req_rank and user_id != ADMIN_ID:
-            await message.answer("У тебя нет прав для этого")
+            await message.answer("Ты слишком маленький для такого")
             return
             
         parts = original_command.split()
@@ -329,7 +336,7 @@ async def handle_messages(message: types.Message):
 
         target_rank = await get_chat_rank(chat_id, target_id)
         if user_id != ADMIN_ID and target_rank > user_rank:
-            await message.answer("Ты не можешь трогать тех, кто выше тебя")
+            await message.answer("Ты слишком маленький для такого")
             return
 
         if action == "бан":
@@ -339,9 +346,10 @@ async def handle_messages(message: types.Message):
             try:
                 delay = parse_time(time_str)
                 await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
-                await message.answer(f"ахах забанили лоха @{target_username}")
+                await message.answer("Ахах забанили лоха")
                 asyncio.create_task(unban_task(chat_id, target_id, delay, target_username))
-            except Exception: await message.answer("Ошибка прав")
+            except Exception: 
+                await message.answer("Я слишком маленький для такого")
         elif action == "мут":
             if not time_str:
                 await message.answer("Укажи время")
@@ -351,8 +359,10 @@ async def handle_messages(message: types.Message):
                 until_date = datetime.now(timezone.utc) + timedelta(seconds=delay)
                 permissions = types.ChatPermissions(can_send_messages=False)
                 await bot.restrict_chat_member(chat_id=chat_id, user_id=target_id, permissions=permissions, until_date=until_date)
-                await message.answer(f"ахах замутили лоха @{target_username}")
-            except Exception: await message.answer("Ошибка прав")
+                await message.answer("Ахах замутили лоха")
+                asyncio.create_task(unmute_task(chat_id, target_id, delay, target_username))
+            except Exception: 
+                await message.answer("Я слишком маленький для такого")
         elif action == "варн":
             target_data = await get_user(target_id)
             now = datetime.now(timezone.utc)
@@ -365,15 +375,17 @@ async def handle_messages(message: types.Message):
             new_warns = target_data["warns"] + 1
             await update_user(target_id, "warns", new_warns)
             await update_user(target_id, "last_warn_time", now)
-            await message.answer(f"ахах заварнили лоха @{target_username}\nварнов {new_warns}/5")
-
+            
             if new_warns >= 5:
+                await message.answer("Ппц лох 5/5 варнов")
                 try:
                     await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
-                    await message.answer(f"Лимит варнов! Забанен на 1 день")
                     asyncio.create_task(unban_task(chat_id, target_id, 86400, target_username))
                     await update_user(target_id, "warns", 0)
                 except Exception: pass
+            else:
+                await message.answer(f"Ахах заварнили лоха\nварнов {new_warns}/5")
+                
         elif action == "варны":
             target_data = await get_user(target_id)
             now = datetime.now(timezone.utc)
@@ -383,7 +395,7 @@ async def handle_messages(message: types.Message):
                 if now - last_warn > timedelta(days=10):
                     warns = 0
                     await update_user(target_id, "warns", 0)
-            await message.answer(f"У @{target_username} сейчас {warns}/5 варнов")
+            await message.answer(f"Ъььэь {warns}/5 варнов")
         return
 
     if command == "профиль":
@@ -394,7 +406,7 @@ async def handle_messages(message: types.Message):
             profile_text += "🏆 Награды:\n"
             for i, award in enumerate(user_data["awards"].split("\n"), 1):
                 profile_text += f"{i}. {award}\n"
-        await message.answer(profile_text)
+        await message.answer(profile_text.strip())
     elif command.startswith("ник "):
         new_nick = original_command[4:].strip()
         if new_nick:
@@ -411,7 +423,7 @@ async def handle_messages(message: types.Message):
             amount = int(command.split()[1])
             new_balance = user_data["balance"] + amount
             await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Начислено {amount}$. Баланс: {new_balance}$")
+            await message.answer(f"Начислено {amount}$ Твой баланс: {new_balance}$")
         except: pass
     elif command.startswith("дать "):
         parts = original_command[5:].strip().split() 
@@ -431,11 +443,11 @@ async def handle_messages(message: types.Message):
             await message.answer("Блин дурак напиши еблан потом дать потом короче юзернейм и потом число еще короче можно в ответ ему написать типо еблан дать 67"); return
         if target_id == user_id: await message.answer("Себе нельзя"); return
         if amount <= 0: await message.answer("Больше нуля"); return
-        if user_data["balance"] < amount: await message.answer("ты бомж ахах"); return
+        if user_data["balance"] < amount: await message.answer("Ты бомж ахах"); return
         target_data = await get_user(target_id)
         await update_user(user_id, "balance", user_data["balance"] - amount)
         await update_user(target_id, "balance", target_data["balance"] + amount)
-        await message.answer(f"Переведено {amount}$ пользователю {target_data['nickname']}")
+        await message.answer("Я все сделал, хозяин!~")
     elif command.startswith("казино "):
         parts = original_command[7:].strip().split()
         if len(parts) != 2: await message.answer("Блин дурак напиши еблан потом казино потом свою ставку и красное или черное это типа на какой цвет ты ставишь понял да"); return
@@ -446,16 +458,17 @@ async def handle_messages(message: types.Message):
         if color in ["кр"]: color = "красное"
         if color in ["чр"]: color = "черное"
         if bet_amount <= 0: await message.answer("Больше нуля"); return
-        if user_data["balance"] < bet_amount: await message.answer("ты бомж ахах"); return
-        result_color = random.choice(["красное", "черное"])
-        if result_color == color:
-            new_balance = user_data["balance"] + bet_amount
-            await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Выпало {result_color}. Ты победил блин молодец")
-        else:
-            new_balance = user_data["balance"] - bet_amount
-            await update_user(user_id, "balance", new_balance)
-            await message.answer(f"Выпало {result_color}. Ты проебал лузер ебаный ахаха соси")
+        if user_data["balance"] < bet_amount: await message.answer("Ты бомж ахах"); return
+                    result_color = random.choice(["красное", "черное"])
+            
+            if result_color == color:
+                new_balance = user_data["balance"] + bet_amount
+                await update_user(user_id, "balance", new_balance)
+                await message.answer(f"Выпало {result_color} ты победил блин молодец")
+            else:
+                new_balance = user_data["balance"] - bet_amount
+                await update_user(user_id, "balance", new_balance)
+                await message.answer(f"Выпало {result_color} ты проебал лузер ебаный ахаха соси")
 
 async def main():
     print("Бот запущен...")
