@@ -209,17 +209,17 @@ async def handle_messages(message: types.Message):
             await message.answer(text_out)
         return
 
+    # Исправленная проверка смены названия ранга!
     if user_rank == 5 or user_id == ADMIN_ID:
-        if text.startswith(("1 админ", "2 админ", "3 админ", "4 админ", "5 админ")):
-            parts = original_command.split(maxsplit=2)
-            if len(parts) == 3:
-                r_num = int(parts[0])
-                r_name = parts[2]
-                conn = await asyncpg.connect(DATABASE_URL)
-                await conn.execute("UPDATE chat_ranks SET rank_name = $1 WHERE chat_id = $2 AND rank = $3", r_name, chat_id, r_num)
-                await conn.close()
-                await message.answer(f"Ранг {r_num} в этом чате теперь называется '{r_name}'")
-                return
+        parts = command.split(maxsplit=2)
+        if len(parts) == 3 and parts[0] in ["1", "2", "3", "4", "5"] and parts[1] == "админ":
+            r_num = int(parts[0])
+            r_name = parts[2]
+            conn = await asyncpg.connect(DATABASE_URL)
+            await conn.execute("UPDATE chat_ranks SET rank_name = $1 WHERE chat_id = $2 AND rank = $3", r_name, chat_id, r_num)
+            await conn.close()
+            await message.answer(f"Ранг {r_num} в этом чате теперь называется '{r_name}'")
+            return
 
     if command.startswith(("назначить ", "разжаловать ")):
         if user_rank < 5 and user_id != ADMIN_ID:
@@ -234,11 +234,15 @@ async def handle_messages(message: types.Message):
         if message.reply_to_message:
             target_id = message.reply_to_message.from_user.id
             target_username = message.reply_to_message.from_user.username or "юзер"
-            if action == "назначить" and len(parts) > 1: new_rank = int(parts[1])
+            if action == "назначить" and len(parts) > 1: 
+                try: new_rank = int(parts[1])
+                except: pass
         elif len(parts) >= 3:
             target_username = parts[1].replace("@", "")
             target_id = await get_user_by_username(target_username)
-            if action == "назначить": new_rank = int(parts[2])
+            if action == "назначить": 
+                try: new_rank = int(parts[2])
+                except: pass
         
         if not target_id:
             await message.answer("Пользователь ушел нахуй")
