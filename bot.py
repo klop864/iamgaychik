@@ -459,8 +459,7 @@ async def handle_messages(message: types.Message):
         if color in ["чр"]: color = "черное"
         if bet_amount <= 0: await message.answer("Больше нуля"); return
         if user_data["balance"] < bet_amount: await message.answer("Ты бомж ахах"); return
-                    result_color = random.choice(["красное", "черное"])
-            
+        result_color = random.choice(["красное", "черное"])
         if result_color == color:
             new_balance = user_data["balance"] + bet_amount
             await update_user(user_id, "balance", new_balance)
