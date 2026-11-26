@@ -216,9 +216,9 @@ async def handle_messages(message: types.Message):
             await message.answer(text_out.strip())
         return
     if command == "очистить_ботов":
-    if user_rank < 5 and user_id != ADMIN_ID:
-        await message.answer("Ты слишком маленький для такого")
-        return
+        if user_rank < 5 and user_id != ADMIN_ID:
+            await message.answer("Ты слишком маленький для такого")
+            return
     conn = await asyncpg.connect(DATABASE_URL)
     # Находим всех в этом чате с рангом > 0
     admins = await conn.fetch("SELECT user_id FROM chat_ranks WHERE chat_id = $1 AND rank > 0", chat_id)
