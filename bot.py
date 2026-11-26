@@ -215,7 +215,24 @@ async def handle_messages(message: types.Message):
         else:
             await message.answer(text_out.strip())
         return
-
+    if command == "очистить_ботов":
+    if user_rank < 5 and user_id != ADMIN_ID:
+        await message.answer("Ты слишком маленький для такого")
+        return
+    conn = await asyncpg.connect(DATABASE_URL)
+    # Находим всех в этом чате с рангом > 0
+    admins = await conn.fetch("SELECT user_id FROM chat_ranks WHERE chat_id = $1 AND rank > 0", chat_id)
+    count = 0
+    for admin in admins:
+        a_id = admin["user_id"]
+        # Проверяем их ник в базе
+        a_data = await get_user(a_id)
+        if a_data["nickname"] == "Без ника":
+            await set_chat_rank(chat_id, a_id, 0)
+            count += 1
+    await conn.close()
+    await message.answer(f"Очистил {count} безымянных олухов")
+    return
     if user_rank == 5 or user_id == ADMIN_ID:
         parts = command.split(maxsplit=2)
         if len(parts) == 3 and parts[0] in ["1", "2", "3", "4", "5"] and parts[1] == "админ":
