@@ -142,7 +142,6 @@ async def cmd_start(message: types.Message):
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer("Иди нахуй")
-
 @dp.message()
 async def handle_messages(message: types.Message):
     if not message.text: return
@@ -232,6 +231,7 @@ async def handle_messages(message: types.Message):
         if user_rank < 5 and user_id != ADMIN_ID:
             await message.answer("Ты слишком маленький для такого")
             return
+            
         parts = original_command.split()
         action = parts[0].lower()
         target_id = None
@@ -244,10 +244,10 @@ async def handle_messages(message: types.Message):
             if action == "назначить" and len(parts) > 1: 
                 try: new_rank = int(parts[1])
                 except: pass
-        elif len(parts) >= 3:
+        elif len(parts) >= 2:
             target_username = parts[1].replace("@", "")
             target_id = await get_user_by_username(target_username)
-            if action == "назначить": 
+            if action == "назначить" and len(parts) > 2:
                 try: new_rank = int(parts[2])
                 except: pass
         
@@ -270,134 +270,132 @@ async def handle_messages(message: types.Message):
             await set_chat_rank(chat_id, target_id, 0)
             await message.answer("Ахах лох")
         return
+if command.startswith("наградить "):
+    if user_rank < 1 and user_id != ADMIN_ID:
+        await message.answer("Ты слишком маленький для такого")
+        return
+    parts = original_command.split(maxsplit=2)
+    target_id = None
+    target_username = None
+    award_text = ""
 
-    if command.startswith("наградить "):
-        if user_rank < 1 and user_id != ADMIN_ID:
-            await message.answer("Ты слишком маленький для такого")
-            return
-        parts = original_command.split(maxsplit=2)
-        target_id = None
-        target_username = None
-        award_text = ""
+    if message.reply_to_message:
+        target_id = message.reply_to_message.from_user.id
+        target_username = message.reply_to_message.from_user.username or "юзер"
+        if len(parts) > 1: award_text = parts[1]
+    elif len(parts) == 3:
+        target_username = parts[1].replace("@", "")
+        target_id = await get_user_by_username(target_username)
+        award_text = parts[2]
+    
+    if not target_id:
+        await message.answer("Пользователь ушел нахуй")
+        return
+    if not award_text:
+        await message.answer("Напиши текст награды")
+        return
 
-        if message.reply_to_message:
-            target_id = message.reply_to_message.from_user.id
-            target_username = message.reply_to_message.from_user.username or "юзер"
-            if len(parts) > 1: award_text = parts[1]
-        elif len(parts) == 3:
-            target_username = parts[1].replace("@", "")
-            target_id = await get_user_by_username(target_username)
-            award_text = parts[2]
+    target_data = await get_user(target_id)
+    target_rank = await get_chat_rank(chat_id, target_id)
+    if user_id != ADMIN_ID and target_rank > user_rank:
+        await message.answer("Ты слишком маленький для такого")
+        return
+
+    current_awards = target_data["awards"]
+    new_awards = f"{current_awards}\n{award_text}" if current_awards else award_text
+    await update_user(target_id, "awards", new_awards)
+    await message.answer("Награда выдана, хозяин!~")
+    return
+
+if command.startswith(("бан ", "мут ", "варн ", "варны ")):
+    action = command.split()[0]
+    req_rank = {"бан": 4, "мут": 3, "варн": 2, "варны": 2}.get(action, 0)
+    
+    if user_rank < req_rank and user_id != ADMIN_ID:
+        await message.answer("Ты слишком маленький для такого")
+        return
         
-        if not target_id:
-            await message.answer("Пользователь ушел нахуй")
-            return
-        if not award_text:
-            await message.answer("Напиши текст награды")
-            return
+    parts = original_command.split()
+    target_id = None
+    target_username = None
+    time_str = None
 
+    if message.reply_to_message:
+        target_id = message.reply_to_message.from_user.id
+        target_username = message.reply_to_message.from_user.username or "юзер"
+        if len(parts) > 1 and action in ["бан", "мут"]: time_str = parts[1]
+    elif len(parts) >= 2:
+        target_username = parts[1].replace("@", "")
+        target_id = await get_user_by_username(target_username)
+        if len(parts) > 2 and action in ["бан", "мут"]: time_str = parts[2]
+    
+    if not target_id:
+        await message.answer("Пользователь ушел нахуй")
+        return
+
+    target_rank = await get_chat_rank(chat_id, target_id)
+    if user_id != ADMIN_ID and target_rank > user_rank:
+        await message.answer("Ты слишком маленький для такого")
+        return
+
+    if action == "бан":
+        if not time_str:
+            await message.answer("Укажи время")
+            return
+        try:
+            delay = parse_time(time_str)
+            await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
+            await message.answer("Ахах забанили лоха")
+            asyncio.create_task(unban_task(chat_id, target_id, delay, target_username))
+        except Exception: 
+            await message.answer("Я слишком маленький для такого")
+    elif action == "мут":
+        if not time_str:
+            await message.answer("Укажи время")
+            return
+        try:
+            delay = parse_time(time_str)
+            until_date = datetime.now(timezone.utc) + timedelta(seconds=delay)
+            permissions = types.ChatPermissions(can_send_messages=False)
+            await bot.restrict_chat_member(chat_id=chat_id, user_id=target_id, permissions=permissions, until_date=until_date)
+            await message.answer("Ахах замутили лоха")
+            asyncio.create_task(unmute_task(chat_id, target_id, delay, target_username))
+        except Exception: 
+            await message.answer("Я слишком маленький для такого")
+    elif action == "варн":
         target_data = await get_user(target_id)
-        target_rank = await get_chat_rank(chat_id, target_id)
-        if user_id != ADMIN_ID and target_rank > user_rank:
-            await message.answer("Ты слишком маленький для такого")
-            return
+        now = datetime.now(timezone.utc)
+        if target_data["last_warn_time"]:
+            last_warn = target_data["last_warn_time"].replace(tzinfo=timezone.utc)
+            if now - last_warn > timedelta(days=10):
+                await update_user(target_id, "warns", 0)
+                target_data["warns"] = 0
 
-        current_awards = target_data["awards"]
-        new_awards = f"{current_awards}\n{award_text}" if current_awards else award_text
-        await update_user(target_id, "awards", new_awards)
-        await message.answer("Награда выдана, хозяин!~")
-        return
-
-    if command.startswith(("бан ", "мут ", "варн ", "варны ")):
-        action = command.split()[0]
-        req_rank = {"бан": 4, "мут": 3, "варн": 2, "варны": 2}.get(action, 0)
+        new_warns = target_data["warns"] + 1
+        await update_user(target_id, "warns", new_warns)
+        await update_user(target_id, "last_warn_time", now)
         
-        if user_rank < req_rank and user_id != ADMIN_ID:
-            await message.answer("Ты слишком маленький для такого")
-            return
-            
-        parts = original_command.split()
-        target_id = None
-        target_username = None
-        time_str = None
-
-        if message.reply_to_message:
-            target_id = message.reply_to_message.from_user.id
-            target_username = message.reply_to_message.from_user.username or "юзер"
-            if len(parts) > 1 and action in ["бан", "мут"]: time_str = parts[1]
-        elif len(parts) >= 2:
-            target_username = parts[1].replace("@", "")
-            target_id = await get_user_by_username(target_username)
-            if len(parts) > 2 and action in ["бан", "мут"]: time_str = parts[2]
-        
-        if not target_id:
-            await message.answer("Пользователь ушел нахуй")
-            return
-
-        target_rank = await get_chat_rank(chat_id, target_id)
-        if user_id != ADMIN_ID and target_rank > user_rank:
-            await message.answer("Ты слишком маленький для такого")
-            return
-
-        if action == "бан":
-            if not time_str:
-                await message.answer("Укажи время")
-                return
+        if new_warns >= 5:
+            await message.answer("Ппц лох 5/5 варнов")
             try:
-                delay = parse_time(time_str)
                 await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
-                await message.answer("Ахах забанили лоха")
-                asyncio.create_task(unban_task(chat_id, target_id, delay, target_username))
-            except Exception: 
-                await message.answer("Я слишком маленький для такого")
-        elif action == "мут":
-            if not time_str:
-                await message.answer("Укажи время")
-                return
-            try:
-                delay = parse_time(time_str)
-                until_date = datetime.now(timezone.utc) + timedelta(seconds=delay)
-                permissions = types.ChatPermissions(can_send_messages=False)
-                await bot.restrict_chat_member(chat_id=chat_id, user_id=target_id, permissions=permissions, until_date=until_date)
-                await message.answer("Ахах замутили лоха")
-                asyncio.create_task(unmute_task(chat_id, target_id, delay, target_username))
-            except Exception: 
-                await message.answer("Я слишком маленький для такого")
-        elif action == "варн":
-            target_data = await get_user(target_id)
-            now = datetime.now(timezone.utc)
-            if target_data["last_warn_time"]:
-                last_warn = target_data["last_warn_time"].replace(tzinfo=timezone.utc)
-                if now - last_warn > timedelta(days=10):
-                    await update_user(target_id, "warns", 0)
-                    target_data["warns"] = 0
-
-            new_warns = target_data["warns"] + 1
-            await update_user(target_id, "warns", new_warns)
-            await update_user(target_id, "last_warn_time", now)
+                asyncio.create_task(unban_task(chat_id, target_id, 86400, target_username))
+                await update_user(target_id, "warns", 0)
+            except Exception: pass
+        else:
+            await message.answer(f"Ахах заварнили лоха\nварнов {new_warns}/5")
             
-            if new_warns >= 5:
-                await message.answer("Ппц лох 5/5 варнов")
-                try:
-                    await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
-                    asyncio.create_task(unban_task(chat_id, target_id, 86400, target_username))
-                    await update_user(target_id, "warns", 0)
-                except Exception: pass
-            else:
-                await message.answer(f"Ахах заварнили лоха\nварнов {new_warns}/5")
-                
-        elif action == "варны":
-            target_data = await get_user(target_id)
-            now = datetime.now(timezone.utc)
-            warns = target_data["warns"]
-            if target_data["last_warn_time"] and warns > 0:
-                last_warn = target_data["last_warn_time"].replace(tzinfo=timezone.utc)
-                if now - last_warn > timedelta(days=10):
-                    warns = 0
-                    await update_user(target_id, "warns", 0)
-            await message.answer(f"Ъььэь {warns}/5 варнов")
-        return
-
+    elif action == "варны":
+        target_data = await get_user(target_id)
+        now = datetime.now(timezone.utc)
+        warns = target_data["warns"]
+        if target_data["last_warn_time"] and warns > 0:
+            last_warn = target_data["last_warn_time"].replace(tzinfo=timezone.utc)
+            if now - last_warn > timedelta(days=10):
+                warns = 0
+                await update_user(target_id, "warns", 0)
+        await message.answer(f"Ъььэь {warns}/5 варнов")
+    return
     if command == "профиль":
         profile_text = f"👤 Ник: {user_data['nickname']}\n"
         if user_data["description"]: profile_text += f"📝 Описание: {user_data['description']}\n"
